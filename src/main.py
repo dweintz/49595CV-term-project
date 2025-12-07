@@ -33,7 +33,7 @@ mp_draw = mp.solutions.drawing_utils  # type: ignore[attr-defined]
 
 # initialize segmentation
 mp_selfie = mp.solutions.selfie_segmentation  # type: ignore[attr-defined]
-selfie = mp_selfie.SelfieSegmentation(model_selection=1)
+selfie = mp_selfie.SelfieSegmentation(model_selection=0)
 
 # load a background image
 background = cv2.imread(BACKGROUND_IMG)
@@ -61,7 +61,7 @@ pygame.mixer.music.play(-1)
 # load fruit images
 fruit_images = [
     cv2.imread(f"assets/fruit/fruit{i}.png", cv2.IMREAD_UNCHANGED)
-    for i in range(1, 3)
+    for i in range(1, 6)
 ]
 PRECOMPUTED_SIZES = {size: [] for size in (40, 80, 120)}
 for img in fruit_images:
@@ -279,12 +279,12 @@ while True:
         frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
         result = selfie.process(frame_rgb)
-        mask = result.segmentation_mask  
-        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)  
-        mask = np.repeat(mask[:, :, 0][:, :, np.newaxis], 3, axis=2) 
+        mask = result.segmentation_mask
+        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+        mask = np.repeat(mask[:, :, 0][:, :, np.newaxis], 3, axis=2)
 
         # create boolean mask
-        condition = mask > 0.5 
+        condition = mask > 0.5
 
         # combine background and webcam frame
         frame = np.where(condition, frame, background)
