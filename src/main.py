@@ -12,18 +12,18 @@ import pygame
 
 # initialize game sound effects
 pygame.mixer.init()
-slice_sound = pygame.mixer.Sound("slash-21834.wav")
+slice_sound = pygame.mixer.Sound("assets/slash-21834.wav")
 slice_sound.set_volume(1.0)
 
 # initialize game background music
-pygame.mixer.music.load("background.mp3")      
+pygame.mixer.music.load("assets/background.mp3")      
 pygame.mixer.music.set_volume(0.3)
 
 # loop background music indefinitely
 pygame.mixer.music.play(-1) 
 
 # load fruit images
-fruit_images = [cv2.imread(f"fruit{i}.png", cv2.IMREAD_UNCHANGED) for i in range(1, 3)]
+fruit_images = [cv2.imread(f"assets/fruit/fruit{i}.png", cv2.IMREAD_UNCHANGED) for i in range(1, 3)]
 
 # initialize MediaPipe Hands
 mp_hands = mp.solutions.hands
