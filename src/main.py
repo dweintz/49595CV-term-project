@@ -16,7 +16,10 @@ DETECT_W, DETECT_H = 320, 180  # resolution of hand detection frame
 GRAVITY = 0.28  # gravity (how fast fruits fall)
 
 BACKGROUND_MUSIC = "assets/background.mp3"
-SLICE_SOUND = "assets/slash-21834.wav"
+SLICE_SOUND = "assets/sword.mp3"
+
+BACKGROUND_IMG = "assets/background.png"
+BACKGROUND = False
 
 # initialize MediaPipe Hands
 mp_hands = mp.solutions.hands  # type: ignore[attr-defined]
@@ -28,10 +31,18 @@ hands = mp_hands.Hands(
 )
 mp_draw = mp.solutions.drawing_utils  # type: ignore[attr-defined]
 
+# initialize segmentation
+mp_selfie = mp.solutions.selfie_segmentation  # type: ignore[attr-defined]
+selfie = mp_selfie.SelfieSegmentation(model_selection=1)
+
+# load a background image
+background = cv2.imread(BACKGROUND_IMG)
+background = cv2.resize(background, (GAME_W, GAME_H))
+
 # open webcam
 cv2.setUseOptimized(True)
 cv2.setNumThreads(4)
-cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)
+cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, GAME_W)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, GAME_H)
 
@@ -261,6 +272,22 @@ while True:
 
     frame = cv2.flip(frame, 1)
     h, w, c = frame.shape
+
+    # place background
+    if BACKGROUND:
+        frame = cv2.resize(frame, (GAME_W, GAME_H))
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        result = selfie.process(frame_rgb)
+        mask = result.segmentation_mask  
+        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)  
+        mask = np.repeat(mask[:, :, 0][:, :, np.newaxis], 3, axis=2) 
+
+        # create boolean mask
+        condition = mask > 0.5 
+
+        # combine background and webcam frame
+        frame = np.where(condition, frame, background)
 
     current_time = time.time()
 
