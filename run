@@ -2,12 +2,27 @@
 
 cd "$(dirname "$0")"
 
-# create venv if not exists
+# create venv if needed
 if [ ! -d "venv" ]; then
     python3 -m venv venv
-    ./venv/bin/pip install -r requirements.txt
 fi
 
-# activate and run game
-source ./venv/bin/activate
-python src/main.py
+# detect platform
+if [ -f "./venv/bin/activate" ]; then
+    source ./venv/bin/activate
+    VENV_PIP="./venv/bin/pip"
+    VENV_PY="./venv/bin/python"
+elif [ -f "./venv/Scripts/activate" ]; then
+    source ./venv/Scripts/activate
+    VENV_PIP="./venv/Scripts/pip.exe"
+    VENV_PY="./venv/Scripts/python.exe"
+else
+    echo "Error: venv activation script not found."
+    exit 1
+fi
+
+# install dependencies if missing
+$VENV_PIP install -r requirements.txt
+
+# run program
+$VENV_PY src/main.py
