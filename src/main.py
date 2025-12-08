@@ -14,9 +14,11 @@ GAME_W, GAME_H = 640, 400  # size of webcam game window
 HAND_FRAME_SKIP = 2  # run hand detection every N frames
 DETECT_W, DETECT_H = 320, 180  # resolution of hand detection frame
 GRAVITY = 0.28  # gravity (how fast fruits fall)
+BOMB_PROBABILITY = 0.12  # probability of spawning a bomb
 
-BACKGROUND_MUSIC = "assets/background.mp3"
+BACKGROUND_MUSIC = "assets/rock_track.mp3"
 SLICE_SOUND = "assets/sword.mp3"
+EXPLOSION_SOUND = "assets/explosion.mp3"
 
 BACKGROUND_IMG = "assets/background.png"
 BACKGROUND = False
@@ -46,10 +48,14 @@ cap = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # cap = cv2.VideoCapture(0)
 cap.set(cv2.CAP_PROP_FRAME_WIDTH, GAME_W)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, GAME_H)
 
-# initialize game sound effects
+# initialize slice sound effect
 pygame.mixer.init()
 slice_sound = pygame.mixer.Sound(SLICE_SOUND)
 slice_sound.set_volume(1.0)
+
+# initialize explosion sound effect
+explosion_sound = pygame.mixer.Sound(EXPLOSION_SOUND)
+explosion_sound.set_volume(1.0)
 
 # initialize game background music
 pygame.mixer.music.load(BACKGROUND_MUSIC)
@@ -63,18 +69,10 @@ fruit_images = [
     cv2.imread(f"assets/fruit/fruit{i}.png", cv2.IMREAD_UNCHANGED)
     for i in range(1, 6)
 ]
-PRECOMPUTED_SIZES = {size: [] for size in (40, 80, 120)}
+PRECOMPUTED_SIZES = {size: [] for size in (60, 80, 110)}
 for img in fruit_images:
     for size in PRECOMPUTED_SIZES:
         PRECOMPUTED_SIZES[size].append(cv2.resize(img, (size, size), cv2.INTER_AREA))  # type: ignore[arg-type]
-
-# game variables
-fruits = []
-spawn_rate = 0.8
-last_spawn_time = time.time()
-score = 0
-miss_penalty = 1
-paused = False
 
 
 def spawn_fruit(frame_width, frame_height):
@@ -86,21 +84,48 @@ def spawn_fruit(frame_width, frame_height):
     """
 
     # choose random size
-    size = random.choice([40, 80, 120])
+    size = random.choice([60, 80, 110])
     radius = size // 2
 
-    # choose random position
+    # spawn at bottom edge
     x = random.randint(radius, frame_width - radius)
-    y = random.randint(frame_height // 2, frame_height - radius)
+    y = frame_height + radius   
 
-    # choose velocity
+    # upward velocity (negative)
     vx = random.uniform(-3, 3)
-    vy = -random.uniform(7, 12)
+    vy = -random.uniform(10, 15) 
 
-    # choose random fruit
-    img = random.choice(fruit_images)
+    # decide whether fruit is bomb
+    if random.random() < BOMB_PROBABILITY:
+        img_file = "assets/bomb.png"
+        img = cv2.imread(img_file, cv2.IMREAD_UNCHANGED)
+        img = cv2.resize(img, (80, 80))
+        radius = 40
 
-    return {"x": x, "y": y, "radius": radius, "vx": vx, "vy": vy, "img": img}
+        return {
+            "x": x,
+            "y": y,
+            "radius": radius,
+            "vx": vx,
+            "vy": vy,
+            "img": img,
+            "type": "bomb",
+            "frame": 0,
+            "exploding": False
+        }
+    else:
+        img = random.choice(fruit_images)
+        return {
+            "x": x,
+            "y": y,
+            "radius": radius,
+            "vx": vx,
+            "vy": vy,
+            "img": img,
+            "type": "fruit",
+            "frame": 0,
+            "exploding": False
+        }
 
 
 def check_collision(fruit, finger_x, finger_y):
@@ -259,140 +284,322 @@ def draw_pause_overlay(frame):
     )
 
 
-pause_gesture_frames = 0  # how many frames pause gesture has been detected
-PAUSE_GESTURE_FRAMES_REQUIRED = 3  # gesture must be held for 3 frames
-pause_cooldown = 3.0  # seconds to wait before detecting next pause/unpause
-last_pause_time = 0.0  # last time pause/unpause occurred
+def draw_explosion(frame, fruit):
+    """
+    Draw explosion effect when bomb is hit.
+    
+    :param frame: video frame.
+    :param fruit: fruit dictionary.
+    """
 
-# game loop
-while True:
-    ret, frame = cap.read()
-    if not ret:
-        break
+    # get fruit locations
+    x, y = int(fruit["x"]), int(fruit["y"])
+    f = fruit["frame"]
 
-    frame = cv2.flip(frame, 1)
-    h, w, c = frame.shape
+    # length of animation and progress
+    max_frames = 40
+    progress = f / max_frames
 
-    # place background
-    if BACKGROUND:
-        frame = cv2.resize(frame, (GAME_W, GAME_H))
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    # main explosion
+    base_radius = fruit["radius"] * (2 + progress * 6)
 
-        result = selfie.process(frame_rgb)
-        mask = result.segmentation_mask
-        mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
-        mask = np.repeat(mask[:, :, 0][:, :, np.newaxis], 3, axis=2)
+    # outer red fireball
+    cv2.circle(frame, (x, y), int(base_radius), (0, 0, 255), -1)
 
-        # create boolean mask
-        condition = mask > 0.5
+    # mid orange layer
+    cv2.circle(frame, (x, y), int(base_radius * 0.75), (0, 140, 255), -1)
 
-        # combine background and webcam frame
-        frame = np.where(condition, frame, background)
+    # inner yellow-white core
+    cv2.circle(frame, (x, y), int(base_radius * 0.45), (0, 255, 255), -1)
+    cv2.circle(frame, (x, y), int(base_radius * 0.25), (255, 255, 255), -1)
 
-    current_time = time.time()
+    # shockwave ring
+    shock_radius = int(base_radius * (1.2 + progress * 2))
+    cv2.circle(frame, (x, y), shock_radius, (255, 255, 255), 4)
 
-    # process hand landmarks
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    result = hands.process(frame_rgb)
-    finger_pos = None
+    # long thick rays
+    ray_length = int(base_radius * 1.5)
+    for i in range(16):
+        angle = math.radians(i * (360 / 16))
+        dx = int(math.cos(angle) * ray_length)
+        dy = int(math.sin(angle) * ray_length)
+        cv2.line(frame, (x, y), (x + dx, y + dy), (0, 165, 255), 6)
 
-    # if hands are detected
-    if result.multi_hand_landmarks:
-        landmarks_list = result.multi_hand_landmarks
+    # short red sparks
+    spark_length = int(base_radius * 0.7)
+    for i in range(25):
+        angle = math.radians(i * (360 / 25))
+        dx = int(math.cos(angle) * spark_length)
+        dy = int(math.sin(angle) * spark_length)
+        cv2.line(frame, (x, y), (x + dx, y + dy), (0, 0, 255), 3)
 
-        # draw all hands
-        for lm in landmarks_list:
-            mp_draw.draw_landmarks(frame, lm, mp_hands.HAND_CONNECTIONS)
+    # random particle debris
+    for _ in range(32):
+        ang = random.random() * math.tau
+        dist = random.random() * base_radius
+        px = int(x + math.cos(ang) * dist)
+        py = int(y + math.sin(ang) * dist)
+        cv2.circle(frame, (px, py), 3, (0, 150, 255), -1)
 
-        # pause gesture detection (needs exactly 2 hands)
-        if len(landmarks_list) == 2:
-            handA, handB = landmarks_list
-            oA = hand_orientation(handA, w, h)
-            oB = hand_orientation(handB, w, h)
+    # advance frame
+    fruit["frame"] += 1
+    return fruit["frame"] > max_frames
 
-            # only check gesture if cooldown has passed
-            if current_time - last_pause_time > pause_cooldown:
-                if hands_touching(handA, handB, w, h) and {
-                    "horizontal",
-                    "vertical",
-                } == {oA, oB}:
-                    pause_gesture_frames += 1
-                    if pause_gesture_frames >= PAUSE_GESTURE_FRAMES_REQUIRED:
-                        paused = not paused
-                        last_pause_time = current_time
-                        pause_gesture_frames = 0
-                else:
-                    pause_gesture_frames = 0
-        else:
-            pause_gesture_frames = 0
 
-        # track index finger of first hand only if not paused
-        if not paused:
-            hand_landmarks = landmarks_list[0]
-            index_finger_tip = hand_landmarks.landmark[8]
-            finger_x = int(index_finger_tip.x * w)
-            finger_y = int(index_finger_tip.y * h)
-            finger_pos = (finger_x, finger_y)
-            cv2.circle(frame, (finger_x, finger_y), 10, (255, 0, 0), -1)
+def game_over_screen(frame):
+    """
+    Game over screen,
+    
+    :param frame: frame
+    """
 
-    # update fruits if not paused
-    if not paused:
-        # spawn fruits
-        if time.time() - last_spawn_time > spawn_rate:
-            fruits.append(spawn_fruit(w, h))
-            last_spawn_time = time.time()
+    # copy frame
+    overlay = frame.copy()
+    h, w = frame.shape[:2]
 
-        # update fruit positions
-        for fruit in fruits:
-            fruit["x"] += fruit["vx"]
-            fruit["y"] += fruit["vy"]
-            fruit["vy"] += GRAVITY
+    # darken overlay
+    cv2.rectangle(overlay, (0, 0), (w, h), (0, 0, 0), -1)
 
-        # remove off-screen fruits and apply miss penalty
-        remaining_fruits = []
-        for fruit in fruits:
-            if fruit["y"] - fruit["radius"] > h:
-                score -= miss_penalty
-            else:
-                remaining_fruits.append(fruit)
-        fruits = remaining_fruits
+    # blend with transparency
+    alpha = 0.55
+    frame[:] = cv2.addWeighted(overlay, alpha, frame, 1 - alpha, 0)
 
-    # check collisions
-    if finger_pos:
-        new_fruits = []
-        for fruit in fruits:
-            if check_collision(fruit, finger_pos[0], finger_pos[1]):
-                score += 1
-                slice_sound.play()
-            else:
-                new_fruits.append(fruit)
-        fruits = new_fruits
+    # draw paused text on frame
+    text = "GAME OVER"
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    scale = 2
+    thickness = 4
+    text_size = cv2.getTextSize(text, font, scale, thickness)[0]
 
-    # draw fruits
-    for fruit in fruits:
-        draw_fruit(frame, fruit)
+    text_x = (w - text_size[0]) // 2
+    text_y = (h + text_size[1]) // 2
 
-    # draw score
     cv2.putText(
-        frame,
-        f"Score: {score}",
-        (10, 50),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.0,
-        (0, 0, 255),
-        2,
+        frame, text, (text_x, text_y), font, scale, (0, 0, 255), thickness
     )
 
-    # draw pause overlay if paused
-    if paused:
-        draw_pause_overlay(frame)
-
-    # show frame
     cv2.imshow("Fruit Ninja Webcam Game", frame)
-    key = cv2.waitKey(1) & 0xFF
-    if key == ord("q"):
-        break
 
-cap.release()
-cv2.destroyAllWindows()
-pygame.mixer.quit()
+    while True:
+        key = cv2.waitKey(1) & 0xFF
+        
+        # quit game if 'q' is pressed
+        if key == ord("q"):
+            cap.release()
+            cv2.destroyAllWindows()
+            pygame.mixer.quit()
+            exit()
+
+        # restart game if 'r' is pressed
+        if key == ord("r"):
+            return 
+
+
+def run_game():
+    # global variables
+    global cap
+    global fruit_images
+    global explosion_sound
+    global slice_sound
+
+    # game variables
+    fruits = []
+    spawn_rate = 0.8
+    last_spawn_time = time.time()
+    score = 0
+    max_score = 0
+    miss_penalty = 1
+    paused = False
+
+    pause_gesture_frames = 0  # how many frames pause gesture has been detected
+    PAUSE_GESTURE_FRAMES_REQUIRED = 3  # gesture must be held for 3 frames
+    pause_cooldown = 3.0  # seconds to wait before detecting next pause/unpause
+    last_pause_time = 0.0  # last time pause/unpause occurred
+
+    # game loop
+    while True:
+        # if 'q' is pressed, quit the game
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
+            cap.release()
+            cv2.destroyAllWindows()
+            pygame.mixer.quit()
+            exit()
+
+        # read frame
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        frame = cv2.flip(frame, 1)
+        h, w, c = frame.shape
+
+        # place background
+        if BACKGROUND:
+            frame = cv2.resize(frame, (GAME_W, GAME_H))
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+            result = selfie.process(frame_rgb)
+            mask = result.segmentation_mask
+            mask = cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)
+            mask = np.repeat(mask[:, :, 0][:, :, np.newaxis], 3, axis=2)
+
+            # create boolean mask
+            condition = mask > 0.5
+
+            # combine background and webcam frame
+            frame = np.where(condition, frame, background)
+
+        current_time = time.time()
+
+        # process hand landmarks
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        result = hands.process(frame_rgb)
+        finger_pos = None
+
+        # if hands are detected
+        if result.multi_hand_landmarks:
+            landmarks_list = result.multi_hand_landmarks
+
+            # draw all hands
+            for lm in landmarks_list:
+                mp_draw.draw_landmarks(frame, lm, mp_hands.HAND_CONNECTIONS)
+
+            # pause gesture detection (needs exactly 2 hands)
+            if len(landmarks_list) == 2:
+                handA, handB = landmarks_list
+                oA = hand_orientation(handA, w, h)
+                oB = hand_orientation(handB, w, h)
+
+                # only check gesture if cooldown has passed
+                if current_time - last_pause_time > pause_cooldown:
+                    if hands_touching(handA, handB, w, h) and {
+                        "horizontal",
+                        "vertical",
+                    } == {oA, oB}:
+                        pause_gesture_frames += 1
+                        if pause_gesture_frames >= PAUSE_GESTURE_FRAMES_REQUIRED:
+                            paused = not paused
+                            last_pause_time = current_time
+                            pause_gesture_frames = 0
+                    else:
+                        pause_gesture_frames = 0
+            else:
+                pause_gesture_frames = 0
+
+            # track index finger of first hand only if not paused
+            if not paused:
+                hand_landmarks = landmarks_list[0]
+                index_finger_tip = hand_landmarks.landmark[8]
+                finger_x = int(index_finger_tip.x * w)
+                finger_y = int(index_finger_tip.y * h)
+                finger_pos = (finger_x, finger_y)
+                cv2.circle(frame, (finger_x, finger_y), 10, (255, 0, 0), -1)
+
+        # update fruits if not paused
+        if not paused:
+            # spawn fruits
+            if time.time() - last_spawn_time > spawn_rate:
+                fruits.append(spawn_fruit(w, h))
+                last_spawn_time = time.time()
+
+            # update fruit positions
+            for fruit in fruits:
+                fruit["x"] += fruit["vx"]
+                fruit["y"] += fruit["vy"]
+                fruit["vy"] += GRAVITY
+
+            # remove off-screen fruits and apply miss penalty
+            remaining_fruits = []
+            for fruit in fruits:
+                if fruit["y"] - fruit["radius"] > h:
+                    score -= miss_penalty
+
+                    # check if strikes exceed limit, diplay game over
+                    if max_score - score > 3:
+                        cv2.imshow("Fruit Ninja Webcam Game", frame)
+                        game_over_screen(frame)
+                        return
+
+                    # fruit is missed, don't keep it
+                    continue  
+
+                remaining_fruits.append(fruit)
+
+            fruits = remaining_fruits
+
+        # check collisions
+        if finger_pos:
+            new_fruits = []
+            for fruit in fruits:
+                if check_collision(fruit, finger_pos[0], finger_pos[1]):
+                    # game over if hit a bomb
+                    if fruit["type"] == "bomb":
+                        explosion_sound.play()
+                        fruit["exploding"] = True
+
+                        # explosion animation
+                        time.sleep(0.5)
+                        for _ in range(100):
+                            draw_explosion(frame, fruit)
+                            cv2.imshow("Fruit Ninja Webcam Game", frame)
+                            cv2.waitKey(1)
+
+                        # display game over
+                        cv2.imshow("Fruit Ninja Webcam Game", frame)
+                        game_over_screen(frame)
+                        return
+
+                    # if hit a regular fruit
+                    else:
+                        score += 1
+                        max_score += 1
+                        slice_sound.play()
+                else:
+                    new_fruits.append(fruit)
+            fruits = new_fruits
+
+        # draw fruits
+        updated_fruits = []
+        for fruit in fruits:
+            if fruit["exploding"]:
+                finished = draw_explosion(frame, fruit)
+                if not finished:
+                    updated_fruits.append(fruit)
+            else:
+                draw_fruit(frame, fruit)
+                updated_fruits.append(fruit)
+
+        fruits = updated_fruits
+
+        # draw score
+        cv2.putText(
+            frame,
+            f"Score: {score}",
+            (10, 50),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 0, 255),
+            2,
+        )
+
+        # draw strikes
+        cv2.putText(
+            frame,
+            f"Strikes: {max_score - score}",
+            (10, 100),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1.0,
+            (0, 0, 255),
+            2,
+        )
+
+        # draw pause overlay if paused
+        if paused:
+            draw_pause_overlay(frame)
+
+        # show frame
+        cv2.imshow("Fruit Ninja Webcam Game", frame)
+
+while True:
+    run_game()
