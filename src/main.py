@@ -217,7 +217,7 @@ def run_game():
                 # check missed fruits
                 remaining_fruits = []
                 for fruit in fruits:
-                    if fruit["y"] - fruit["radius"] > h:
+                    if fruit["y"] - fruit["radius"] > h and fruit["type"] != "bomb":
                         score -= miss_penalty
                         if max_score - score > 3:
                             game_over = True
