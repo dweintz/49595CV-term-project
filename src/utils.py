@@ -5,6 +5,8 @@ import random
 import math
 from PIL import Image
 
+SCORE_PATH = "C:/Users/Donny Weintz/Downloads/ECE 49595CV/49595CV-term-project/assets/game_stats.txt"
+
 
 def load_mediapipe(min_confidence):
     """
@@ -111,7 +113,7 @@ def spawn_fruit(frame_width, frame_height, fruit_images, bomb_probability):
     radius = size // 2
 
     # spawn at bottom edge
-    x = random.randint(radius, frame_width - radius)
+    x = random.randint(radius + int(frame_width * 0.15), frame_width - radius - int(frame_width * 0.15))
     y = frame_height + radius   
 
     # upward velocity (negative)
@@ -213,7 +215,7 @@ def draw_fruit(frame, fruit):
     roi[:] = (img_resized[:, :, :3] * mask + roi * (1 - mask)).astype(np.uint8)
 
 
-def draw_game_overlay(frame, text):
+def draw_game_overlay(frame, text, score):
     """
     Draw overlay on screen.
     
@@ -239,7 +241,7 @@ def draw_game_overlay(frame, text):
     text_size = cv2.getTextSize(text, font, scale, thickness)[0]
 
     text_x = (w - text_size[0]) // 2
-    text_y = (h + text_size[1]) // 2
+    text_y = (h + text_size[1]) // 2 - 35
 
     color = (0, 0, 255)
     if text == "PAUSED":
@@ -248,3 +250,34 @@ def draw_game_overlay(frame, text):
     cv2.putText(
         frame, text, (text_x, text_y), font, scale, color, thickness
     )
+
+    # place extra text for game over screen
+    if text == "GAME OVER":
+        high_score = load_high_score(SCORE_PATH)
+        if score > high_score:
+            high_score = score
+            save_high_score(score, SCORE_PATH)
+        high_score_text = f"High Score: {high_score}"
+        cv2.putText(
+            frame, high_score_text, (50, text_y + 50), font, 0.75, (255, 255, 255), 2
+        )
+        instruction_text = "Double Thumbs up to restart game"
+        cv2.putText(
+            frame, instruction_text, (50, text_y + 100), font, 0.75, (255, 255, 255), 2
+        )    
+        instruction_text = "Double Thumbs down to restart quit"
+        cv2.putText(
+            frame, instruction_text, (50, text_y + 150), font, 0.75, (255, 255, 255), 2
+        )  
+
+def load_high_score(path):
+    try:
+        with open(path, "r") as f:
+            return int(f.read().strip())
+    except FileNotFoundError:
+        return 0 
+    
+
+def save_high_score(score, path):
+    with open(path, "w") as f:
+        f.write(str(score))

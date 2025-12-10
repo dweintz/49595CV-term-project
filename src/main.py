@@ -77,7 +77,7 @@ pygame.mixer.music.play(-1)
 # load fruit images
 fruit_images = [
     cv2.imread(f"assets/fruit/fruit{i}.png", cv2.IMREAD_UNCHANGED)
-    for i in range(1, 6)
+    for i in range(1, 9)
 ]
 PRECOMPUTED_SIZES = {size: [] for size in (60, 80, 110)}
 for img in fruit_images:
@@ -261,7 +261,7 @@ def run_game():
 
         # draw overlay
         if overlay:
-            draw_game_overlay(frame, "PAUSED")
+            draw_game_overlay(frame, "PAUSED", score)
 
         # play explosion GIF if a bomb was hit
         if explosion_playing:
@@ -289,7 +289,7 @@ def run_game():
 
         # draw game over overlay if not playing explosion
         if game_over and not explosion_playing:
-            draw_game_overlay(frame, "GAME OVER")
+            draw_game_overlay(frame, "GAME OVER", score)
 
         # quit game via 'q' key
         cv2.imshow("Fruit Ninja Webcam Game", frame)
