@@ -12,6 +12,7 @@ from utils import check_collision
 from utils import draw_fruit
 from utils import draw_game_overlay
 from gesture_collection.model import GestureModel
+from pointing import PointingTracker
 
 GAME_W, GAME_H = 640, 400  # size of webcam game window
 HAND_FRAME_SKIP = 2  # run hand detection every N frames
@@ -108,6 +109,9 @@ def run_game():
     explosion_playing = False  # True when explosion GIF is currently showing
     explosion_start_time = 0  # timestamp of when explosion animation started
 
+    use_pointing = False # False = original fingertip tracking, True = pointing.py
+    pointer = None
+
     while True:
         # read a frame from webcam
         ret, frame = cap.read()
@@ -179,22 +183,29 @@ def run_game():
                 gesture_frames = 0
 
         # draw hands and fingertip
-        if result.multi_hand_landmarks:
-            if SHOW_HANDS:
-                for lm in result.multi_hand_landmarks:
-                    mp_draw.draw_landmarks(frame, lm, mp_hands.HAND_CONNECTIONS)
+        if result.multi_hand_landmarks and SHOW_HANDS:
+            for lm in result.multi_hand_landmarks:
+                mp_draw.draw_landmarks(frame, lm, mp_hands.HAND_CONNECTIONS)
 
-            # only track slicing finger when game not paused or over
-            if not overlay and not game_over:
-                hand_landmarks = result.multi_hand_landmarks[0]
-                index_tip = hand_landmarks.landmark[8]
-                finger_x = int(index_tip.x * w)
-                finger_y = int(index_tip.y * h)
-                finger_pos = (finger_x, finger_y)
+        # only track slicing finger when game not paused or over
+        if not overlay and not game_over:
+            if use_pointing and pointer is not None:
+                # use eye+finger pointing from pointing.py
+                sx, sy = pointer.process_frame(frame, draw_debug=False)
+                if sx is not None and sy is not None:
+                    finger_pos = (sx, sy)
+                    cv2.circle(frame, finger_pos, 10, (255, 0, 0), -1)
+            else:
+                # original fingertip tracking (first hand)
+                if result.multi_hand_landmarks:
+                    hand_landmarks = result.multi_hand_landmarks[0]
+                    index_tip = hand_landmarks.landmark[8]
+                    finger_x = int(index_tip.x * w)
+                    finger_y = int(index_tip.y * h)
+                    finger_pos = (finger_x, finger_y)
 
-                # draw blue dot in fingertip
-                cv2.circle(frame, (finger_x, finger_y), 10, (255, 0, 0), -1)
-
+                    # draw blue dot in fingertip
+                    cv2.circle(frame, (finger_x, finger_y), 10, (255, 0, 0), -1)
         # game logic
         if not game_over and not explosion_playing:
             if not overlay:
@@ -288,8 +299,19 @@ def run_game():
 
         # quit game via 'q' key
         cv2.imshow("Fruit Ninja Webcam Game", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord("q"):
             quit_game()
+
+        if key == ord("p"):
+            if not use_pointing:
+                print("Switching to pointing mode (eye+finger). Running calibration...")
+                # create / re-create tracker with calibration
+                pointer = PointingTracker(cap, w, h, do_calibration=True)
+                use_pointing = True
+            else:
+                print("Switching back to normal fingertip mode.")
+                use_pointing = False
 
 
 while True:
