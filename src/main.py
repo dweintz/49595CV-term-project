@@ -29,19 +29,13 @@ SLICE_SOUND = "assets/sword.mp3"
 EXPLOSION_SOUND = "assets/explosion.mp3"
 EXPLOSION_GIF = "assets/explosion_animation.gif"
 
-# load the saved gesture model checkpoint
+# load architecture, weights, and set model to inference mode
 checkpoint = torch.load("gesture_mlp.pth", map_location="cpu")
 class_names = checkpoint["classes"]
 num_classes = len(class_names)
 
-# load architecture, weights, and set model to inference mode
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = GestureModel(num_classes)
-model.load_state_dict(checkpoint["model"])
-model.to(device)
-model.eval()
-
-model = GestureModel(num_classes)
+model = GestureModel(input_dim=129, hidden_dim=256, num_classes=num_classes).to(device)
 model.load_state_dict(checkpoint["model"])
 model.eval()
 
@@ -135,11 +129,12 @@ def run_game():
         if result.multi_hand_landmarks and len(result.multi_hand_landmarks) == 2:
             fv = extract_features(result)
             if fv is not None:
-                x = torch.tensor(fv, dtype=torch.float32)
+                x = torch.tensor(fv, dtype=torch.float32).to(device)
+                x = x.squeeze(0)
 
                 # run gesture detection model
                 with torch.no_grad():
-                    logits = model(x)
+                    logits = model(x.unsqueeze(0))
                     probs = torch.softmax(logits, dim=1)
                     conf, pred = torch.max(probs, dim=1)
 
