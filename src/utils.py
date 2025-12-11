@@ -265,7 +265,7 @@ def draw_game_overlay(frame, text, score):
         cv2.putText(
             frame, instruction_text, (50, text_y + 100), font, 0.75, (255, 255, 255), 2
         )    
-        instruction_text = "Double Thumbs down to restart quit"
+        instruction_text = "Double Thumbs down to quit"
         cv2.putText(
             frame, instruction_text, (50, text_y + 150), font, 0.75, (255, 255, 255), 2
         )  
